@@ -1,6 +1,8 @@
 # --- Core server ---
 Flask>=3.0
 gunicorn>=21.2
+pydantic>=2.6
+
 
 # --- Optional: bật nếu bạn dùng các lib này ---
 # python-telegram-bot>=13
