@@ -25,7 +25,7 @@ def healthz():
 # ---------------------------------------------------------
 _HANDLER = None
 try:
-    from functions.http.telegram_webhook import telegram_webhook as _FUNC_HANDLER  # type: ignore
+    from src.functions.http.telegram_webhook import telegram_webhook as _FUNC_HANDLER  # type: ignore
     _HANDLER = _FUNC_HANDLER
     logger.info("Loaded handler from functions/http/telegram_webhook.py")
 except Exception as e:
@@ -57,5 +57,6 @@ def telegram_webhook_route():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
+
 
 
