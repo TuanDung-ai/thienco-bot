@@ -3,7 +3,7 @@ import sys
 import logging
 from flask import Flask, request, jsonify
 
-# Thêm đường dẫn src vào sys.path để import được functions/*
+# Thêm đường dẫn src vào sys.path để import đượ functions/*
 CURRENT_DIR = os.path.dirname(__file__)
 if CURRENT_DIR not in sys.path:
     sys.path.append(CURRENT_DIR)
@@ -57,3 +57,4 @@ def telegram_webhook_route():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
+
