@@ -16,20 +16,21 @@ from core.providers.openrouter_provider import OpenRouterProvider
 
 # ===== Singletons =====
 SETTINGS = load_settings_from_env()
-# ✅ Debug LLM cấu hình (phát hiện lỗi thiếu biến)
-from infra.logging import log
 
+# ✅ Helper function (chỉ định nghĩa 1 lần)
 def _mask(s: str) -> str:
+    """Ẩn secret, chỉ hiển thị độ dài + 12 ký tự hash đầu"""
     if not s:
-        return "None"
-    import hashlib
+        return "len=0 sha256=none"
     return f"len={len(s)} sha256={hashlib.sha256(s.encode()).hexdigest()[:12]}"
 
+# ✅ Debug LLM cấu hình (phát hiện lỗi thiếu biến)
 log("LLM_CONFIG", {
     "LLM_API_KEY": _mask(SETTINGS.LLM_API_KEY),
     "LLM_MODEL": SETTINGS.LLM_MODEL,
     "LLM_BASE_URL": SETTINGS.LLM_BASE_URL,
 })
+
 if not SETTINGS.LLM_API_KEY:
     raise ValueError("❌ LLM_API_KEY is missing. Please cung cấp key LLM_API_KEY qua biến môi trường.")
 
@@ -49,12 +50,6 @@ def _error(body: Dict[str, Any] | str, code=400):
     resp = make_response(json.dumps(body, ensure_ascii=False), code)
     resp.headers["Content-Type"] = "application/json; charset=utf-8"
     return resp
-
-def _mask(s: str) -> str:
-    """Ẩn secret, chỉ hiển thị độ dài + 12 ký tự hash đầu"""
-    if not s:
-        return "len=0 sha256=none"
-    return f"len={len(s)} sha256={hashlib.sha256(s.encode()).hexdigest()[:12]}"
 
 async def _handle_update(update: Dict[str, Any]):
     msg = update.get("message") or update.get("edited_message")
@@ -107,31 +102,43 @@ async def _handle_update(update: Dict[str, Any]):
             return
 
     # Normal text -> call LLM
-    system = build_system_prompt()
-    messages = [
-        ChatMessage(role="system", content=system),
-        ChatMessage(role="user", content=text),
-    ]
-    reply = await LLM.chat(
-        messages,
-        max_tokens=SETTINGS.MAX_TOKENS,
-        temperature=SETTINGS.TEMPERATURE
-    )
+    try:
+        system = build_system_prompt()
+        messages = [
+            ChatMessage(role="system", content=system),
+            ChatMessage(role="user", content=text),
+        ]
+        reply = await LLM.chat(
+            messages,
+            max_tokens=SETTINGS.MAX_TOKENS,
+            temperature=SETTINGS.TEMPERATURE
+        )
 
-    await send_message(SETTINGS.TELEGRAM_TOKEN, chat_id, reply)
+        await send_message(SETTINGS.TELEGRAM_TOKEN, chat_id, reply)
 
-    # Log vào Supabase (đổi user_id -> chat_id để khớp schema)
-    if chat_id:
-        insert_message({
-            "chat_id": str(chat_id),
-            "role": "user",
-            "content": text,
-        })
-        insert_message({
-            "chat_id": str(chat_id),
-            "role": "assistant",
-            "content": reply,
-        })
+        # ✅ Sửa lỗi: sử dụng "user_id" thay vì "chat_id" để khớp với schema
+        if chat_id:
+            insert_message({
+                "user_id": chat_id,  # ✅ Khớp với schema Supabase
+                "role": "user",
+                "content": text,
+            })
+            insert_message({
+                "user_id": chat_id,  # ✅ Khớp với schema Supabase
+                "role": "assistant",
+                "content": reply,
+            })
+    except Exception as e:
+        log_error("Error processing message:", str(e))
+        # Gửi thông báo lỗi cho user
+        try:
+            await send_message(
+                SETTINGS.TELEGRAM_TOKEN, 
+                chat_id, 
+                "Xin lỗi, có lỗi xảy ra. Vui lòng thử lại sau."
+            )
+        except:
+            pass  # Tránh lỗi chồng lỗi
 
 def telegram_webhook(request: Request):
     # Verify secret header với debug
@@ -146,6 +153,8 @@ def telegram_webhook(request: Request):
 
     try:
         update = request.get_json(force=True, silent=False)
+        if not update:
+            return _error("Empty request body", 400)
     except Exception as e:
         log_error("Bad JSON:", e)
         return _error("Bad request JSON", 400)
