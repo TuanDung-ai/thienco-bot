@@ -122,14 +122,22 @@ async def _handle_update(update: Dict[str, Any]):
     temperature = float(getattr(settings, "TEMPERATURE", 0.3))
 
     answer: str | None = None
-    for i in range(3):
-        try:
-            with Timer("llm_call_retry_%d" % i) as t:
-                answer = await asyncio.wait_for(
-                    provider.chat(messages, max_tokens=max_tokens, temperature=temperature),
-                    timeout=llm_timeout,
-                )
-            break
+   for i in range(3):
+    try:
+        t = Timer()  # không truyền label
+        answer = await asyncio.wait_for(
+            provider.chat(messages, max_tokens=max_tokens, temperature=temperature),
+            timeout=llm_timeout,
+        )
+        ms = t.stop_ms()
+        log("llm_call_retry", i, "ms", ms)
+        break
+    except asyncio.TimeoutError:
+        log_error(f"LLM timeout at retry {i}")
+        await asyncio.sleep(0.4 * (2 ** i))
+    except Exception as e:
+        log_error("LLM error:", e)
+        await asyncio.sleep(0.4 * (2 ** i))
         except asyncio.TimeoutError:
             log_error(f"LLM timeout at retry {i}")
             await asyncio.sleep(0.4 * (2 ** i))
