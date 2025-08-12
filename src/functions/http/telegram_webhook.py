@@ -101,11 +101,10 @@ async def _handle_update(update: Dict[str, Any]):
     # Fast‑path cho lệnh cơ bản (giảm gọi LLM)
     low = user_text.lower()
     if low in ("/start", "start", "hi", "hello"):
-        reply = (
-            "Xin chào, mình là Thiên Cơ 🤖. Cứ nhắn tin là mình trợ giúp ngay!
-"
-            "(Mẹo: cứ hỏi ngắn gọn để phản hồi nhanh và tiết kiệm chi phí)"
-        )
+       reply = (
+    "Xin chào, mình là Thiên Cơ 🤖. Cứ nhắn tin là mình trợ giúp ngay!\n"
+    "(Mẹo: cứ hỏi ngắn gọn để phản hồi nhanh và tiết kiệm chi phí)"
+)
         await _send_safe(settings.TELEGRAM_TOKEN, chat_id, reply)
         await _safe_insert_message({"user_id": chat_id, "role": "assistant", "content": reply})
         return
