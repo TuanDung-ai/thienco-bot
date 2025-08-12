@@ -1,8 +1,18 @@
-cat > Dockerfile << 'EOF'
+# syntax=docker/dockerfile:1
+
 FROM python:3.10-slim
+
+# Set working directory
 WORKDIR /app
+
+# Copy project files
 COPY . .
-RUN pip install --upgrade pip && pip install -r requirements.txt
-ENV PYTHONUNBUFFERED=1
-CMD ["gunicorn", "-w", "1", "-b", ":8080", "app:app"]
-EOF
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Expose port
+EXPOSE 8080
+
+# Entrypoint
+CMD ["gunicorn", "-w", "1", "-b", ":8080", "main:app"]
