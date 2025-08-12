@@ -1,7 +1,7 @@
 import json
 import asyncio
-import hashlib
-from typing import Any, Dict
+import hmac
+from typing import Any, Dict, Optional
 
 from flask import Request, request, make_response
 
@@ -12,11 +12,12 @@ from infra.supabase_client import init_supabase, insert_message
 from core.llm_provider import ChatMessage, build_system_prompt
 from core.providers.openrouter_provider import OpenRouterProvider
 
+
 # =====================
-# Helpers: HTTP responses
+# HTTP helpers
 # =====================
 
-def _ok(body: Dict[str, Any] | None = None, status: int = 200):
+def _ok(body: Optional[Dict[str, Any]] = None, status: int = 200):
     resp = make_response(json.dumps(body or {"ok": True}), status)
     resp.headers["Content-Type"] = "application/json"
     return resp
@@ -27,30 +28,52 @@ def _error(message: str, status: int = 400):
 
 
 # =====================
-# Security: constant-time secret verify (defense-in-depth)
+# Security
 # =====================
 
-def _verify_secret(req: Request, secret_expected: str | None) -> bool:
+def _verify_secret(req: Request, secret_expected: Optional[str]) -> bool:
+    """Verify Telegram secret header (defense-in-depth)."""
     if not secret_expected:
-        # Nếu chưa cấu hình secret, tạm chấp nhận (không khuyến nghị production)
+        # Không khuyến nghị cho production, nhưng không chặn nếu chưa cấu hình.
         return True
     got = req.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    return hashlib.sha256(got.encode()).hexdigest() == hashlib.sha256(secret_expected.encode()).hexdigest()
+    # So sánh constant-time
+    return hmac.compare_digest(got, secret_expected)
 
 
 # =====================
-# Core handler (async)
+# Supabase helpers (no-op nếu chưa cấu hình)
 # =====================
 
-async def _safe_insert_message(data: Dict[str, Any]):
+def _supabase_is_configured(settings) -> bool:
+    return bool(getattr(settings, "SUPABASE_URL", "") and getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", ""))
+
+
+def _init_supabase_if_configured(settings) -> None:
+    if _supabase_is_configured(settings):
+        try:
+            init_supabase(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+        except Exception as e:
+            # Không làm vỡ luồng nếu key sai; chỉ log nhẹ.
+            log_error("supabase init error:", e)
+
+
+async def _safe_insert_message(settings, data: Dict[str, Any]) -> None:
+    if not _supabase_is_configured(settings):
+        return
     try:
         insert_message(data)
     except Exception as e:
+        # Best-effort: không để lỗi DB ảnh hưởng webhook
         log_error("supabase insert error:", e)
 
 
-async def _send_safe(token: str, chat_id: int, text: str, parse_mode: str | None = "Markdown"):
-    """Gửi Telegram an toàn: nếu lỗi parse Markdown, thử lại dạng thường."""
+# =====================
+# Telegram helper (safe send)
+# =====================
+
+async def _send_safe(token: str, chat_id: int, text: str, parse_mode: Optional[str] = "Markdown") -> None:
+    """Gửi Telegram an toàn: nếu lỗi Markdown, thử lại dạng thường."""
     try:
         await send_message(token, chat_id, text, parse_mode=parse_mode)
     except Exception as e:
@@ -61,14 +84,15 @@ async def _send_safe(token: str, chat_id: int, text: str, parse_mode: str | None
             log_error("telegram send error (plain):", e2)
 
 
+# =====================
+# Core handler (async)
+# =====================
+
 async def _handle_update(update: Dict[str, Any]):
     settings = load_settings_from_env()
 
-    # Chuẩn bị Supabase (best-effort)
-    try:
-        init_supabase(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
-    except Exception as e:
-        log_error("supabase init error:", e)
+    # Supabase (chỉ init nếu có cấu hình đầy đủ)
+    _init_supabase_if_configured(settings)
 
     # Parse message
     msg = update.get("message") or update.get("edited_message")
@@ -76,7 +100,7 @@ async def _handle_update(update: Dict[str, Any]):
         log("no message in update")
         return
 
-    chat = msg.get("chat", {}) or {}
+    chat = (msg.get("chat") or {})
     chat_id = chat.get("id")
     text = msg.get("text", "")
 
@@ -88,14 +112,14 @@ async def _handle_update(update: Dict[str, Any]):
     max_input = int(getattr(settings, "MAX_INPUT", 1000))
     user_text = (text or "").strip()[: max(1, max_input)]
 
-    # Ghi log người dùng (best-effort)
-    await _safe_insert_message({"user_id": chat_id, "role": "user", "content": user_text})
+    # Ghi log người dùng (best-effort, no-op nếu Supabase chưa cấu hình)
+    await _safe_insert_message(settings, {"user_id": chat_id, "role": "user", "content": user_text})
 
-    # Nếu thiếu API key → trả lời nhanh để xác nhận bot sống
+    # Thiếu API key → trả lời xác nhận bot đang sống
     if not getattr(settings, "LLM_API_KEY", None):
         reply = "Bot đang chạy (no LLM_API_KEY). Bạn gửi: " + (user_text or "(empty)")
         await _send_safe(settings.TELEGRAM_TOKEN, chat_id, reply)
-        await _safe_insert_message({"user_id": chat_id, "role": "assistant", "content": reply})
+        await _safe_insert_message(settings, {"user_id": chat_id, "role": "assistant", "content": reply})
         return
 
     # Fast-path cho lệnh cơ bản (giảm gọi LLM)
@@ -106,7 +130,7 @@ async def _handle_update(update: Dict[str, Any]):
             "(Mẹo: cứ hỏi ngắn gọn để phản hồi nhanh và tiết kiệm chi phí)"
         )
         await _send_safe(settings.TELEGRAM_TOKEN, chat_id, reply)
-        await _safe_insert_message({"user_id": chat_id, "role": "assistant", "content": reply})
+        await _safe_insert_message(settings, {"user_id": chat_id, "role": "assistant", "content": reply})
         return
 
     # Chuẩn bị lời gọi LLM
@@ -116,14 +140,15 @@ async def _handle_update(update: Dict[str, Any]):
         ChatMessage(role="user", content=user_text or "ping"),
     ]
 
+    # Gọi LLM với retry + timeout
     llm_timeout = int(getattr(settings, "LLM_TIMEOUT", 8))  # giây
     max_tokens = int(getattr(settings, "MAX_TOKENS", 256))
     temperature = float(getattr(settings, "TEMPERATURE", 0.3))
 
-    answer: str | None = None
+    answer: Optional[str] = None
     for i in range(3):
         try:
-            t = Timer()  # KHÔNG truyền tham số
+            t = Timer()  # KHÔNG truyền tham số cho Timer
             answer = await asyncio.wait_for(
                 provider.chat(messages, max_tokens=max_tokens, temperature=temperature),
                 timeout=llm_timeout,
@@ -143,7 +168,8 @@ async def _handle_update(update: Dict[str, Any]):
 
     # Gửi và log (best-effort)
     await _send_safe(settings.TELEGRAM_TOKEN, chat_id, answer, parse_mode="Markdown")
-    await _safe_insert_message({"user_id": chat_id, "role": "assistant", "content": answer})
+    await _safe_insert_message(settings, {"user_id": chat_id, "role": "assistant", "content": answer})
+
 
 # =====================
 # Flask entrypoint
@@ -152,7 +178,7 @@ async def _handle_update(update: Dict[str, Any]):
 def telegram_webhook_route():
     settings = load_settings_from_env()
 
-    # Defense‑in‑depth: verify secret ở đây nữa (đã có lớp ở app.py)
+    # Verify secret lần nữa (đã có lớp ở app.py)
     if not _verify_secret(request, settings.TELEGRAM_SECRET_TOKEN):
         log_error("Invalid secret token")
         return _error("Unauthorized", 401)
