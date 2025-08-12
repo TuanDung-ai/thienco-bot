@@ -11,7 +11,7 @@ def init_supabase(url: Optional[str], key: Optional[str]):
         log_error("Supabase disabled (missing URL or SERVICE_ROLE_KEY).")
         return
     try:
-        from supabase import create_client, Client
+        from supabase.client import create_client, Client
         _client = create_client(url, key)
     except Exception as e:
         _client = None
