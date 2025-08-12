@@ -76,7 +76,7 @@ async def _handle_update(update: Dict[str, Any]):
         log("no message in update")
         return
 
-    chat = msg.get("chat", {})
+    chat = msg.get("chat", {}) or {}
     chat_id = chat.get("id")
     text = msg.get("text", "")
 
@@ -85,20 +85,20 @@ async def _handle_update(update: Dict[str, Any]):
         return
 
     # Cắt input để tiết kiệm chi phí
-    max_input = getattr(settings, "MAX_INPUT", 1000)
-    user_text = (text or "").strip()[: max(1, int(max_input))]
+    max_input = int(getattr(settings, "MAX_INPUT", 1000))
+    user_text = (text or "").strip()[: max(1, max_input)]
 
-    # Ghi log người dùng (best‑effort, không chặn luồng)
+    # Ghi log người dùng (best-effort)
     await _safe_insert_message({"user_id": chat_id, "role": "user", "content": user_text})
 
-    # Trường hợp không có API key → trả lời nhanh để xác nhận bot sống
+    # Nếu thiếu API key → trả lời nhanh để xác nhận bot sống
     if not getattr(settings, "LLM_API_KEY", None):
         reply = "Bot đang chạy (no LLM_API_KEY). Bạn gửi: " + (user_text or "(empty)")
         await _send_safe(settings.TELEGRAM_TOKEN, chat_id, reply)
         await _safe_insert_message({"user_id": chat_id, "role": "assistant", "content": reply})
         return
 
-    # Fast‑path cho lệnh cơ bản (giảm gọi LLM)
+    # Fast-path cho lệnh cơ bản (giảm gọi LLM)
     low = user_text.lower()
     if low in ("/start", "start", "hi", "hello"):
         reply = (
@@ -116,28 +116,21 @@ async def _handle_update(update: Dict[str, Any]):
         ChatMessage(role="user", content=user_text or "ping"),
     ]
 
-    # Gọi LLM với retry + timeout (asyncio.wait_for)
     llm_timeout = int(getattr(settings, "LLM_TIMEOUT", 8))  # giây
     max_tokens = int(getattr(settings, "MAX_TOKENS", 256))
     temperature = float(getattr(settings, "TEMPERATURE", 0.3))
 
     answer: str | None = None
-   for i in range(3):
-    try:
-        t = Timer()  # không truyền label
-        answer = await asyncio.wait_for(
-            provider.chat(messages, max_tokens=max_tokens, temperature=temperature),
-            timeout=llm_timeout,
-        )
-        ms = t.stop_ms()
-        log("llm_call_retry", i, "ms", ms)
-        break
-    except asyncio.TimeoutError:
-        log_error(f"LLM timeout at retry {i}")
-        await asyncio.sleep(0.4 * (2 ** i))
-    except Exception as e:
-        log_error("LLM error:", e)
-        await asyncio.sleep(0.4 * (2 ** i))
+    for i in range(3):
+        try:
+            t = Timer()  # KHÔNG truyền tham số
+            answer = await asyncio.wait_for(
+                provider.chat(messages, max_tokens=max_tokens, temperature=temperature),
+                timeout=llm_timeout,
+            )
+            ms = t.stop_ms()
+            log("llm_call_retry", i, "ms", ms)
+            break
         except asyncio.TimeoutError:
             log_error(f"LLM timeout at retry {i}")
             await asyncio.sleep(0.4 * (2 ** i))
@@ -148,10 +141,9 @@ async def _handle_update(update: Dict[str, Any]):
     if not answer:
         answer = "Xin lỗi, hệ thống đang bận. Mình trả lời ngắn trước nhé 🤖💤"
 
-    # Gửi và log (best‑effort)
+    # Gửi và log (best-effort)
     await _send_safe(settings.TELEGRAM_TOKEN, chat_id, answer, parse_mode="Markdown")
     await _safe_insert_message({"user_id": chat_id, "role": "assistant", "content": answer})
-
 
 # =====================
 # Flask entrypoint
