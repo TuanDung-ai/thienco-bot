@@ -3,7 +3,7 @@ import sys
 import logging
 from flask import Flask, request, jsonify
 
-# Thêm đường dẫn src vào sys.path để import đượ functions/*
+# Thêm đường dẫn src vào sys.path để import được functions/*
 CURRENT_DIR = os.path.dirname(__file__)
 if CURRENT_DIR not in sys.path:
     sys.path.append(CURRENT_DIR)
@@ -21,7 +21,7 @@ def healthz():
     return jsonify(status="ok"), 200
 
 # ---------------------------------------------------------
-# Cố gắng dùng handler có sẵn (nếu bạn đã viết ở src/functions/http/telegram_webhook.py)
+# Load handler Telegram webhook nếu có
 # ---------------------------------------------------------
 _HANDLER = None
 try:
@@ -35,15 +35,14 @@ except Exception as e:
     )
 
 # ---------------------------------------------------------
-# Route webhook Telegram
+# Route chính nhận webhook Telegram
 # ---------------------------------------------------------
 @app.post("/telegram-webhook")
 def telegram_webhook_route():
     if _HANDLER:
-        # chuyển tiếp request cho handler kiểu "Cloud Functions"
         return _HANDLER(request)
 
-    # Stub mặc định: chỉ nhận và trả 200 cho Telegram
+    # Trường hợp không có handler, trả về stub
     try:
         data = request.get_json(silent=True) or {}
     except Exception:
@@ -51,12 +50,14 @@ def telegram_webhook_route():
     logger.info("Received webhook: %s", data)
     return jsonify(ok=True), 200
 
+# ✅ Alias route cho Telegram gửi về "/"
+@app.post("/")
+def webhook_root_alias():
+    return telegram_webhook_route()
+
 # ---------------------------------------------------------
-# Local run (Cloud Run sẽ dùng Procfile + gunicorn, không gọi nhánh này)
+# Dành cho local run
 # ---------------------------------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
-
-
-
