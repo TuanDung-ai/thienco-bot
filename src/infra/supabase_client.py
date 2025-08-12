@@ -20,6 +20,9 @@ def init_supabase(url: Optional[str], key: Optional[str]):
 def insert_message(row: Dict[str, Any]):
     if _client is None:
         return
+    if not row.get("chat_id"):
+        log_error("Supabase insert skipped: chat_id is missing.")
+        return
     try:
         _client.table("messages").insert(row).execute()
     except Exception as e:
