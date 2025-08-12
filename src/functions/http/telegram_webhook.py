@@ -16,15 +16,13 @@ from core.providers.openrouter_provider import OpenRouterProvider
 
 # ===== Singletons =====
 SETTINGS = load_settings_from_env()
-init_supabase(SETTINGS.SUPABASE_URL, SETTINGS.SUPABASE_SERVICE_ROLE_KEY)
-if not SETTINGS.LLM_API_KEY:
-    raise ValueError("❌ LLM_API_KEY is missing. Please set it via environment variable.")
 
-LLM = OpenRouterProvider(
-    SETTINGS.LLM_API_KEY,
-    SETTINGS.LLM_MODEL,
-    SETTINGS.LLM_BASE_URL
-)
+if not SETTINGS.LLM_API_KEY:
+    raise ValueError("❌ LLM_API_KEY is missing. Please cung cấp key LLM_API_KEY qua biến môi trường.")
+
+init_supabase(SETTINGS.SUPABASE_URL, SETTINGS.SUPABASE_SERVICE_ROLE_KEY)
+LLM = OpenRouterProvider(SETTINGS.LLM_API_KEY, SETTINGS.LLM_MODEL, SETTINGS.LLM_BASE_URL)
+
 def _ok(body: Dict[str, Any] | str = "OK", code=200):
     if isinstance(body, str):
         body = {"ok": True, "message": body}
