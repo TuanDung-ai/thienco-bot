@@ -15,5 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 EXPOSE 8080
 
 # Entrypoint
-CMD ["gunicorn", "-w", "1", "-b", ":8080", "app:app"]
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8080"]
+
 
