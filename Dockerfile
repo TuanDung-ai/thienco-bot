@@ -1,20 +1,21 @@
-# syntax=docker/dockerfile:1
+FROM python:3.11-slim
 
-FROM python:3.10-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Set working directory
 WORKDIR /app
 
-# Copy project files
-COPY . .
+# Tạo user không phải root
+RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
 
-# Install dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose port
-EXPOSE 8080
+COPY . .
 
-# Entrypoint
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8080"]
+USER appuser
 
+ENV PORT=8080
 
+# Gunicorn: 2 workers, 8 threads (I/O bound), phù hợp webhook
+CMD ["bash","-lc","gunicorn app:app -w 2 -k gthread --threads 8 -b :${PORT} --timeout 120 --keep-alive 5"]
