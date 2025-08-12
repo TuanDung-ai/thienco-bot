@@ -16,7 +16,20 @@ from core.providers.openrouter_provider import OpenRouterProvider
 
 # ===== Singletons =====
 SETTINGS = load_settings_from_env()
+# ✅ Debug LLM cấu hình (phát hiện lỗi thiếu biến)
+from infra.logging import log
 
+def _mask(s: str) -> str:
+    if not s:
+        return "None"
+    import hashlib
+    return f"len={len(s)} sha256={hashlib.sha256(s.encode()).hexdigest()[:12]}"
+
+log("LLM_CONFIG", {
+    "LLM_API_KEY": _mask(SETTINGS.LLM_API_KEY),
+    "LLM_MODEL": SETTINGS.LLM_MODEL,
+    "LLM_BASE_URL": SETTINGS.LLM_BASE_URL,
+})
 if not SETTINGS.LLM_API_KEY:
     raise ValueError("❌ LLM_API_KEY is missing. Please cung cấp key LLM_API_KEY qua biến môi trường.")
 
