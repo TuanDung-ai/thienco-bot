@@ -113,13 +113,13 @@ async def _handle_update(update: Dict[str, Any]):
     user_text = (text or "").strip()[: max(1, max_input)]
 
     # Ghi log người dùng (best-effort, no-op nếu Supabase chưa cấu hình)
-    await _safe_insert_message(settings, {"user_id": chat_id, "role": "user", "content": user_text})
+    await _safe_insert_message(settings, {"user_id": chat_id, "chat_id": chat_id, "role": "user", "content": user_text})
 
     # Thiếu API key → trả lời xác nhận bot đang sống
     if not getattr(settings, "LLM_API_KEY", None):
         reply = "Bot đang chạy (no LLM_API_KEY). Bạn gửi: " + (user_text or "(empty)")
         await _send_safe(settings.TELEGRAM_TOKEN, chat_id, reply)
-        await _safe_insert_message(settings, {"user_id": chat_id, "role": "assistant", "content": reply})
+        await _safe_insert_message(settings, {"user_id": chat_id, "chat_id": chat_id, "role": "assistant", "content": reply})
         return
 
     # Fast-path cho lệnh cơ bản (giảm gọi LLM)
@@ -130,7 +130,7 @@ async def _handle_update(update: Dict[str, Any]):
             "(Mẹo: cứ hỏi ngắn gọn để phản hồi nhanh và tiết kiệm chi phí)"
         )
         await _send_safe(settings.TELEGRAM_TOKEN, chat_id, reply)
-        await _safe_insert_message(settings, {"user_id": chat_id, "role": "assistant", "content": reply})
+        await _safe_insert_message(settings, {"user_id": chat_id, "chat_id": chat_id, "role": "assistant", "content": reply})
         return
 
     # Chuẩn bị lời gọi LLM
@@ -168,7 +168,7 @@ async def _handle_update(update: Dict[str, Any]):
 
     # Gửi và log (best-effort)
     await _send_safe(settings.TELEGRAM_TOKEN, chat_id, answer, parse_mode="Markdown")
-    await _safe_insert_message(settings, {"user_id": chat_id, "role": "assistant", "content": answer})
+    await _safe_insert_message(settings, {"user_id": chat_id, "chat_id": chat_id, "role": "assistant", "content": answer})
 
 
 # =====================
