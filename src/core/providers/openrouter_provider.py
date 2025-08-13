@@ -8,8 +8,11 @@ class OpenRouterProvider(LLMProvider):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
-        self.endpoint = f"{self.base_url}/v1/chat/completions"
-
+        self.endpoint = (
+    f"{self.base_url}/chat/completions"
+    if self.base_url.endswith("/v1")
+    else f"{self.base_url}/v1/chat/completions"
+)
     async def chat(self, messages: List[ChatMessage], max_tokens: int, temperature: float) -> str:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
