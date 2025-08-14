@@ -12,6 +12,20 @@ from infra.supabase_client import init_supabase, insert_message
 from core.llm_provider import ChatMessage, build_system_prompt
 from core.providers.openrouter_provider import OpenRouterProvider
 
+from infra.telegram_api import send_message, send_typing  # add import
+
+async def _handle_update(update: Dict[str, Any]):
+    settings = load_settings_from_env()
+    _init_supabase_if_configured(settings)
+
+    # --- gửi typing sớm ---
+    chat_id = ((update.get("message") or update.get("edited_message")) or {}).get("chat", {}).get("id")
+    if chat_id:
+        try:
+            await send_typing(settings.TELEGRAM_TOKEN, chat_id)
+        except Exception as e:
+            log_error("typing warn:", e)
+
 
 # =====================
 # HTTP helpers
