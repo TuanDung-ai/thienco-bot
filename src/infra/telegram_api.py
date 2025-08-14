@@ -15,3 +15,7 @@ async def send_message(token: str, chat_id: int, text: str, parse_mode: str | No
         if r.status_code != 200:
             log("telegram error:", r.text)
         return r.json()
+async def send_typing(token: str, chat_id: int):
+    url = f"{BASE}/bot{token}/sendChatAction"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        await client.post(url, json={"chat_id": chat_id, "action": "typing"})
