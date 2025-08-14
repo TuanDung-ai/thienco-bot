@@ -111,6 +111,15 @@ def telegram_webhook():
 def webhook_root_alias():
     return telegram_webhook_route()
 
+# --- add below other routes in app.py ---
+import datetime
+
+@app.get("/version")
+def version():
+    rev = os.getenv("K_REVISION", "unknown")
+    ts = datetime.datetime.utcnow().isoformat() + "Z"
+    return {"revision": rev, "built_at": ts}
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
