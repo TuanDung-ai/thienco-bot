@@ -122,9 +122,16 @@ def root():
     return jsonify(ok=True, service="thienco-bot"), 200
 
 
-@app.get("/healthz")
-def healthz():
-    # Endpoint dùng cho smoke test/monitor
+@app.get("/health")
+def health_alias():
+    return jsonify(status="ok"), 200
+
+@app.get("/_healthz")
+def healthz_alias():
+    return jsonify(status="ok"), 200
+
+@app.get("/_ah/health")
+def app_engine_health_alias():
     return jsonify(status="ok"), 200
 
 
