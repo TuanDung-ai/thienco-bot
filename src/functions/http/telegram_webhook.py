@@ -7,25 +7,17 @@ from flask import Request, request, make_response
 
 from infra.config import load_settings_from_env
 from infra.logging import log, log_error, Timer
-from infra.telegram_api import send_message
 from infra.supabase_client import init_supabase, insert_message
+from infra.telegram_api import send_message, send_typing
+
 from core.llm_provider import ChatMessage, build_system_prompt
 from core.providers.openrouter_provider import OpenRouterProvider
 
-from infra.telegram_api import send_message, send_typing  # add import
+# RAG / Memory
+from core.memory_store import MemoryStore
 
-async def _handle_update(update: Dict[str, Any]):
-    settings = load_settings_from_env()
-    _init_supabase_if_configured(settings)
-
-    # --- gửi typing sớm ---
-    chat_id = ((update.get("message") or update.get("edited_message")) or {}).get("chat", {}).get("id")
-    if chat_id:
-        try:
-            await send_typing(settings.TELEGRAM_TOKEN, chat_id)
-        except Exception as e:
-            log_error("typing warn:", e)
-
+# Khởi tạo bộ nhớ 1 lần (dựa trên ENV)
+_memory = MemoryStore()
 
 # =====================
 # HTTP helpers
@@ -48,10 +40,10 @@ def _error(message: str, status: int = 400):
 def _verify_secret(req: Request, secret_expected: Optional[str]) -> bool:
     """Verify Telegram secret header (defense-in-depth)."""
     if not secret_expected:
-        # Không khuyến nghị cho production, nhưng không chặn nếu chưa cấu hình.
+        # Cho phép chạy nếu chưa cấu hình secret (không khuyến nghị production)
         return True
     got = req.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    # So sánh constant-time
+    # So sánh constant-time để tránh timing attack
     return hmac.compare_digest(got, secret_expected)
 
 
@@ -68,7 +60,7 @@ def _init_supabase_if_configured(settings) -> None:
         try:
             init_supabase(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
         except Exception as e:
-            # Không làm vỡ luồng nếu key sai; chỉ log nhẹ.
+            # Không làm vỡ luồng nếu key sai; chỉ log nhẹ
             log_error("supabase init error:", e)
 
 
@@ -99,6 +91,75 @@ async def _send_safe(token: str, chat_id: int, text: str, parse_mode: Optional[s
 
 
 # =====================
+# RAG nội bộ (smart reply)
+# =====================
+
+async def smart_reply(user_id: int, user_text: str) -> str:
+    """
+    Trộn persona + 'ngữ cảnh nhớ' (vector Top-K) + câu hỏi hiện tại -> gọi LLM.
+    user_id: dùng chính chat_id Telegram để đồng nhất với DB (messages.user_id)
+    """
+    settings = load_settings_from_env()
+
+    # 1) Truy xuất ngữ cảnh liên quan (Top-K)
+    topk = int(getattr(settings, "MEMORY_TOPK", 8))
+    try:
+        retrieved = await _memory.search(user_id, user_text, top_k=topk)
+    except Exception as e:
+        log_error("memory_search error:", e)
+        retrieved = []
+
+    ctx_lines = []
+    for row in (retrieved or []):
+        try:
+            # score 0..1; càng cao càng liên quan
+            if float(row.get("score", 0)) >= 0.65:
+                ctx_lines.append(f"- {row['content']}")
+        except Exception:
+            pass
+    context = "\n".join(ctx_lines)
+
+    # 2) System prompt (persona) + Ngữ cảnh nhớ
+    sys = build_system_prompt()
+    if context:
+        sys += "\n\nNgữ cảnh nhớ (nếu liên quan):\n" + context
+
+    messages = [
+        ChatMessage(role="system", content=sys),
+        ChatMessage(role="user", content=user_text or "ping")
+    ]
+
+    # 3) Gọi LLM (tận dụng OpenRouter provider sẵn có)
+    provider = OpenRouterProvider(
+        api_key=getattr(settings, "LLM_API_KEY", ""),
+        model=getattr(settings, "LLM_MODEL", "openai/gpt-3.5-turbo"),
+        base_url=getattr(settings, "LLM_BASE_URL", "https://openrouter.ai/api"),
+    )
+    llm_timeout = int(getattr(settings, "LLM_TIMEOUT", 8))
+    max_tokens = int(getattr(settings, "MAX_TOKENS", 256))
+    temperature = float(getattr(settings, "TEMPERATURE", 0.3))
+
+    for i in range(3):
+        try:
+            t = Timer()  # không truyền tham số
+            ans = await asyncio.wait_for(
+                provider.chat(messages, max_tokens=max_tokens, temperature=temperature),
+                timeout=llm_timeout,
+            )
+            ms = t.stop_ms()
+            log("llm_call_retry", i, "ms", ms)
+            return ans.strip()
+        except asyncio.TimeoutError:
+            log_error(f"LLM timeout at retry {i}")
+            await asyncio.sleep(0.4 * (2 ** i))
+        except Exception as e:
+            log_error("LLM error:", e)
+            await asyncio.sleep(0.4 * (2 ** i))
+
+    return "Xin lỗi, hệ thống đang bận. Mình trả lời ngắn trước nhé 🤖💤"
+
+
+# =====================
 # Core handler (async)
 # =====================
 
@@ -126,6 +187,12 @@ async def _handle_update(update: Dict[str, Any]):
     max_input = int(getattr(settings, "MAX_INPUT", 1000))
     user_text = (text or "").strip()[: max(1, max_input)]
 
+    # Gửi 'typing…' sớm cho trải nghiệm mượt
+    try:
+        await send_typing(settings.TELEGRAM_TOKEN, chat_id)
+    except Exception as e:
+        log_error("typing warn:", e)
+
     # Ghi log người dùng (best-effort, no-op nếu Supabase chưa cấu hình)
     await _safe_insert_message(settings, {"user_id": chat_id, "chat_id": chat_id, "role": "user", "content": user_text})
 
@@ -148,38 +215,8 @@ async def _handle_update(update: Dict[str, Any]):
         await _safe_insert_message(settings, {"user_id": chat_id, "chat_id": chat_id, "role": "assistant", "content": reply})
         return
 
-    # Chuẩn bị lời gọi LLM
-    provider = OpenRouterProvider(settings.LLM_API_KEY, settings.LLM_MODEL, settings.LLM_BASE_URL)
-    messages = [
-        ChatMessage(role="system", content=build_system_prompt()),
-        ChatMessage(role="user", content=user_text or "ping"),
-    ]
-
-    # Gọi LLM với retry + timeout
-    llm_timeout = int(getattr(settings, "LLM_TIMEOUT", 8))  # giây
-    max_tokens = int(getattr(settings, "MAX_TOKENS", 256))
-    temperature = float(getattr(settings, "TEMPERATURE", 0.3))
-
-    answer: Optional[str] = None
-    for i in range(3):
-        try:
-            t = Timer()  # KHÔNG truyền tham số cho Timer
-            answer = await asyncio.wait_for(
-                provider.chat(messages, max_tokens=max_tokens, temperature=temperature),
-                timeout=llm_timeout,
-            )
-            ms = t.stop_ms()
-            log("llm_call_retry", i, "ms", ms)
-            break
-        except asyncio.TimeoutError:
-            log_error(f"LLM timeout at retry {i}")
-            await asyncio.sleep(0.4 * (2 ** i))
-        except Exception as e:
-            log_error("LLM error:", e)
-            await asyncio.sleep(0.4 * (2 ** i))
-
-    if not answer:
-        answer = "Xin lỗi, hệ thống đang bận. Mình trả lời ngắn trước nhé 🤖💤"
+    # === NÃO RAG: persona + ngữ cảnh nhớ + LLM ===
+    answer = await smart_reply(chat_id, user_text)
 
     # Gửi và log (best-effort)
     await _send_safe(settings.TELEGRAM_TOKEN, chat_id, answer, parse_mode="Markdown")
