@@ -8,6 +8,8 @@ python-dotenv==1.0.1
 openai>=1.0.0
 python-dateutil
 pytz
+sentence-transformers>=3.0.0
+torch>=2.1.0
 
 
 # --- Optional: bật nếu bạn dùng các lib này ---
