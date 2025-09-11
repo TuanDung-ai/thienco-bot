@@ -1,7 +1,7 @@
 import os, asyncio
 from typing import List, Dict, Any
 from supabase.client import create_client
-from .providers.embeddings_provider import EmbeddingsProvider
+from core.providers.embeddings_provider import EmbeddingsProvider
 
 EMBED_MODEL   = os.getenv("EMBED_MODEL", "text-embedding-3-small")
 BASE_URL      = os.getenv("LLM_BASE_URL", "https://openrouter.ai/api")
