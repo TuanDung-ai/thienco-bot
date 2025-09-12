@@ -1,6 +1,6 @@
 import os, asyncio
 from typing import List, Dict, Any
-from supabase.client import create_client
+from supabase import create_client
 from core.providers.embeddings_provider import EmbeddingsProvider
 
 EMBED_MODEL   = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
@@ -15,29 +15,46 @@ class MemoryStore:
         self.db = create_client(SUPABASE_URL, SUPABASE_KEY) if (SUPABASE_URL and SUPABASE_KEY) else None
         self.emb = EmbeddingsProvider(API_KEY, BASE_URL, EMBED_MODEL)
 
-    async def search(self, user_id: int, query: str, top_k: int = TOPK) -> List[Dict[str, Any]]:
+    async def search(self, user_id: int | str, query: str, top_k: int = TOPK) -> List[Dict[str, Any]]:
         if not self.db:
             return []
         vec = (await self.emb.embed([query]))[0]
-        rpc = self.db.rpc("memory_search", {"u": user_id, "q": vec, "k": top_k}).execute()
+        # user_id trong DB là TEXT → ép về string để RPC khớp kiểu
+        rpc = self.db.rpc("memory_search", {"u": str(user_id), "q": vec, "k": top_k}).execute()
         return rpc.data or []
 
-    async def add_fact(self, user_id: int, content: str, weight: float = 1.0):
-        if not self.db: return
-        res = self.db.table("memory_facts").insert({"user_id": user_id, "content": content, "weight": weight}).execute()
+    async def add_fact(self, user_id: int | str, content: str, weight: float = 1.0):
+        if not self.db:
+            return
+        # đưa weight vào meta cho an toàn với schema hiện tại
+        res = self.db.table("memory_facts").insert({
+            "user_id": str(user_id), "content": content, "meta": {"weight": weight}
+        }).execute()
         fid = res.data[0]["id"]
         emb = (await self.emb.embed([content]))[0]
         self.db.table("memory_vectors").insert({
-            "user_id": user_id, "ref_type": "summary", "ref_id": sid, "content": summary, "embedding": emb
+            "user_id": str(user_id),
+            "ref_type": "fact",
+            "ref_id": fid,
+            "content": content,
+            "embedding": emb
         }).execute()
 
-    async def add_summary(self, user_id: int, window_start_at: str, window_end_at: str, summary: str):
-        if not self.db: return
+    async def add_summary(self, user_id: int | str, window_start_at: str, window_end_at: str, summary: str):
+        if not self.db:
+            return
         res = self.db.table("conv_summaries").insert({
-            "user_id": user_id, "window_start_at": window_start_at, "window_end_at": window_end_at, "summary": summary
+            "user_id": str(user_id),
+            "window_start_at": window_start_at,
+            "window_end_at": window_end_at,
+            "summary": summary
         }).execute()
         sid = res.data[0]["id"]
         emb = (await self.emb.embed([summary]))[0]
         self.db.table("memory_vectors").insert({
-            "user_id": user_id, "ref_type": "summary", "ref_id": sid, "content": summary, "embedding": emb
+            "user_id": str(user_id),
+            "ref_type": "summary",
+            "ref_id": sid,
+            "content": summary,
+            "embedding": emb
         }).execute()
