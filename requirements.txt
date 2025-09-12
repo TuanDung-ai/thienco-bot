@@ -8,12 +8,12 @@
  openai>=1.0.0
  python-dateutil
  pytz
--sentence-transformers>=3.0.0
--torch>=2.1.0
+
+
 +
-+# --- Embeddings (Cloud Run) ---
-+fastembed==0.3.6
-+
-+# --- Optional (dev local, KHÔNG bật trên Cloud Run) ---
-+# sentence-transformers>=3.0.0
-+# torch>=2.1.0
+# --- Embeddings (Cloud Run) ---
+fastembed==0.3.6
+
+# --- Optional (dev local, KHÔNG bật trên Cloud Run) ---
+# sentence-transformers>=3.0.0
+# torch>=2.1.0
