@@ -1,21 +1,21 @@
-# src/core/providers/embeddings_provider.py
 import os
 from functools import lru_cache
-from sentence_transformers import SentenceTransformer
+from typing import List
+from fastembed import TextEmbedding
 
-MODEL_ID = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+MODEL_ID = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")  # dim=384
 
 @lru_cache(maxsize=1)
-def _load_model():
-    # tải 1 lần, cache trong process
-    return SentenceTransformer(MODEL_ID, device="cpu")  # Cloud Run dùng CPU
+def _embedder():
+    # download 1 lần, chạy CPU
+    return TextEmbedding(model_name=MODEL_ID, cache_dir="/tmp/fastembed")
 
-def embed(texts: list[str]) -> list[list[float]]:
+def embed(texts: List[str]) -> List[List[float]]:
     if not isinstance(texts, (list, tuple)):
         texts = [texts]
-    model = _load_model()
-    vecs = model.encode(list(texts), normalize_embeddings=True).tolist()
-    return vecs
+    emb = list(_embedder().embed(texts))
+    # normalize = False theo mặc định; nếu cần cosine, có thể tự chuẩn hóa
+    return [list(v) for v in emb]
 
-def embed_one(text: str) -> list[float]:
+def embed_one(text: str) -> List[float]:
     return embed([text])[0]
