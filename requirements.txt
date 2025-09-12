@@ -8,12 +8,12 @@ python-dotenv==1.0.1
 openai>=1.0.0
 python-dateutil
 pytz
-sentence-transformers>=3.0.0
-torch>=2.1.0
 
+# --- Embeddings ---
+fastembed==0.3.6   # dùng chính thức cho Cloud Run (nhẹ, CPU-friendly)
 
-# --- Optional: bật nếu bạn dùng các lib này ---
+# --- Optional: bật khi chạy local dev ---
+# sentence-transformers>=3.0.0
+# torch>=2.1.0
 # python-telegram-bot>=13
 # requests>=2.31
-# supabase>=2.6
-# pydantic>=2.6
