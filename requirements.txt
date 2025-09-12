@@ -10,7 +10,7 @@
  pytz
 
 
-+
+
 # --- Embeddings (Cloud Run) ---
 fastembed==0.3.6
 
