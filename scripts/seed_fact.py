@@ -9,14 +9,9 @@
 #   EMBED_MODEL (default sentence-transformers/all-MiniLM-L6-v2)
 #   --- Chỉ khi dùng HTTP embeddings (OpenRouter/OpenAI) ---
 #   LLM_BASE_URL (default https://openrouter.ai/api), LLM_API_KEY
-#
-# Tự động chọn provider:
-# - Nếu model bắt đầu bằng "sentence-transformers/" hoặc "local:" -> dùng LOCAL (miễn phí).
-# - Ngược lại -> dùng HTTP (OpenRouter/OpenAI), gọi /v1/embeddings.
 
-import os, argparse, asyncio, json, sys
+import os, argparse, asyncio, json, sys, importlib.util
 from typing import Optional, List
-from supabase import create_client
 
 try:
     import httpx  # chỉ dùng khi gọi HTTP
@@ -66,7 +61,7 @@ def _load_local_model(model_id: str):
     except Exception as e:
         raise SystemExit(
             "sentence-transformers chưa được cài. Thêm vào requirements.txt:\n"
-            "  sentence-transformers>=3.0.0\n  torch>=2.1.0\n"
+            "  sentence-transformers>=3.0.0\n  torch>=2.1.0 (hoặc dùng FastEmbed nếu thiếu dung lượng)\n"
             f"Chi tiết lỗi import: {e}"
         )
     _local_model = SentenceTransformer(model_id, device="cpu")
@@ -100,11 +95,10 @@ async def get_embedding_http(text: str, model_id: str, base_url: str, api_key: s
     body_preview = r.text[:800]
 
     if "application/json" not in ct:
-        # Thường là HTML từ Next.js/Cloudflare -> báo lỗi rõ
         raise SystemExit(
             f"[ERROR] HTTP embeddings không trả JSON (CT={ct}, status={r.status_code}).\n"
             f"URL: {url}\n"
-            "→ Kiểm tra lại LLM_BASE_URL (phải có /api), LLM_API_KEY và quyền model.\n"
+            "→ Kiểm tra LLM_BASE_URL (/api), LLM_API_KEY và quyền model.\n"
             f"Body preview:\n{body_preview}"
         )
 
@@ -114,7 +108,7 @@ async def get_embedding_http(text: str, model_id: str, base_url: str, api_key: s
     try:
         return data["data"][0]["embedding"]
     except Exception:
-        raise SystemExit(f"[ERROR] Response JSON không có field data[0].embedding:\n{json.dumps(data)[:800]}")
+        raise SystemExit(f"[ERROR] JSON không có data[0].embedding:\n{json.dumps(data)[:800]}")
 
 
 def pretty_dim_hint(dim: int) -> str:
@@ -135,12 +129,27 @@ def pretty_dim_hint(dim: int) -> str:
     )
 
 
+def create_supabase_client():
+    """
+    Import an toàn để tránh bị 'shadow' bởi thư mục local tên 'supabase/' trong repo.
+    """
+    spec = importlib.util.find_spec("supabase")
+    if spec is None or not spec.origin or "/site-packages/" not in spec.origin.replace("\\", "/"):
+        raise SystemExit(
+            "Không tìm thấy thư viện 'supabase' từ site-packages, hoặc đang bị đè bởi thư mục local.\n"
+            "→ Cài đặt:  pip install -U 'supabase>=2.4.0'\n"
+            "→ Nếu repo của bạn có thư mục tên 'supabase/', hãy đổi tên nó (vd: 'supabase_sql')."
+        )
+    from supabase import create_client  # type: ignore
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--user-id", type=int, required=True)
     ap.add_argument("--content", type=str, required=True)
     ap.add_argument("--model", type=str, default=EMBED_MODEL,
-                    help="Model embeddings. VD: sentence-transformers/all-MiniLM-L6-v2 (local) "
+                    help="VD: sentence-transformers/all-MiniLM-L6-v2 (LOCAL) "
                          "hoặc openai/text-embedding-3-small (HTTP)")
     args = ap.parse_args()
 
@@ -148,9 +157,9 @@ def main():
         raise SystemExit("Thiếu SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
 
     model_id = args.model.strip()
+
     # 1) Lấy embedding
     if is_local_model(model_id):
-        # Cho phép prefix local:xxx để rõ ràng, nhưng cũng nhận sentence-transformers/...
         if model_id.startswith("local:"):
             model_id = model_id.split("local:", 1)[1]
         emb = get_embedding_local(args.content, model_id)
@@ -167,7 +176,7 @@ def main():
     print(f"Provider: {provider} | Model: {model_id} | Embedding length: {dim}")
 
     # 2) Ghi vào Supabase
-    db = create_client(SUPABASE_URL, SUPABASE_KEY)
+    db = create_supabase_client()
     fact = db.table("memory_facts").insert({
         "user_id": args.user_id,
         "content": args.content
@@ -183,9 +192,8 @@ def main():
             "embedding": emb
         }).execute()
     except Exception as e:
-        # Nếu fail do sai số chiều -> gợi ý sửa schema
         msg = str(e)
-        if "expected" in msg.lower() or "dimension" in msg.lower() or "vector" in msg.lower():
+        if any(k in msg.lower() for k in ("expected", "dimension", "vector", "length", "size")):
             print("[ERROR] Lỗi khi insert vector vào Supabase (có thể sai số chiều).", file=sys.stderr)
             print(pretty_dim_hint(dim), file=sys.stderr)
         raise
