@@ -13,6 +13,12 @@ def _get_fastembed(model_id: str):
     from fastembed import TextEmbedding
     return TextEmbedding(model_name=model_id, cache_dir=CACHE_DIR)
 
+def _to_pyfloat_list(vec) -> List[float]:
+    """Ép mọi phần tử về float thuần (tránh float32 không JSON-serializable)."""
+    if hasattr(vec, "tolist"):
+        vec = vec.tolist()
+    return [float(x) for x in vec]
+
 class EmbeddingsProvider:
     """
     Dùng interface async để khớp với code hiện tại:
@@ -21,7 +27,7 @@ class EmbeddingsProvider:
     Với FastEmbed (local), api_key/base_url không dùng nhưng vẫn nhận tham số
     để không phải sửa chỗ gọi.
     """
-    def __init__(self, api_key: str, base_url: str, model_id: str | None = None):
+    def __init__(self, api_key: str = "", base_url: str = "", model_id: str | None = None):
         self.api_key = api_key
         self.base_url = (base_url or "").rstrip("/")
         self.model_id = model_id or DEFAULT_MODEL
@@ -30,7 +36,6 @@ class EmbeddingsProvider:
         texts = list(texts or [])
         if not texts:
             return []
-        # FastEmbed CPU, trả iterator → list
+        # FastEmbed CPU, trả iterator → list[list[float]]
         emb = _get_fastembed(self.model_id)
-        vecs = [list(v) for v in emb.embed(texts)]
-        return vecs
+        return [_to_pyfloat_list(v) for v in emb.embed(texts)]
