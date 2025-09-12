@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 from supabase.client import create_client
 from core.providers.embeddings_provider import EmbeddingsProvider
 
-EMBED_MODEL   = os.getenv("EMBED_MODEL", "text-embedding-3-small")
+EMBED_MODEL   = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 BASE_URL      = os.getenv("LLM_BASE_URL", "https://openrouter.ai/api")
 API_KEY       = os.getenv("LLM_API_KEY", "")
 SUPABASE_URL  = os.getenv("SUPABASE_URL")
@@ -19,7 +19,7 @@ class MemoryStore:
         if not self.db:
             return []
         vec = (await self.emb.embed([query]))[0]
-        rpc = self.db.rpc("memory_search", {"p_user_id": user_id, "query_embedding": vec, "k": top_k}).execute()
+        rpc = self.db.rpc("memory_search", {"u": user_id, "q": vec, "k": top_k}).execute()
         return rpc.data or []
 
     async def add_fact(self, user_id: int, content: str, weight: float = 1.0):
@@ -28,7 +28,7 @@ class MemoryStore:
         fid = res.data[0]["id"]
         emb = (await self.emb.embed([content]))[0]
         self.db.table("memory_vectors").insert({
-            "user_id": user_id, "ref_type": "fact", "ref_id": fid, "content": content, "embedding": emb
+            "user_id": user_id, "ref_type": "summary", "ref_id": sid, "content": summary, "embedding": emb
         }).execute()
 
     async def add_summary(self, user_id: int, window_start_at: str, window_end_at: str, summary: str):
@@ -39,5 +39,5 @@ class MemoryStore:
         sid = res.data[0]["id"]
         emb = (await self.emb.embed([summary]))[0]
         self.db.table("memory_vectors").insert({
-            "user_id": user_id, "ref_type": "summary", "summary_id": sid, "content": summary, "embedding": emb
+            "user_id": user_id, "ref_type": "summary", "ref_id": sid, "content": summary, "embedding": emb
         }).execute()
