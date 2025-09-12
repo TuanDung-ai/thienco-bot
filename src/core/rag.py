@@ -4,21 +4,21 @@ from typing import List, Dict, Any
 from supabase import Client
 
 class RAGRetriever:
-    def __init__(self, supabase_client: Client, embeddings_provider, dim: int = 1536, topk: int = 8, min_score: float = 0.65):
+    def __init__(self, supabase_client: Client, embeddings_provider, dim: int = 384, topk: int = 8, min_score: float = 0.65):
         self.db = supabase_client
         self.emb = embeddings_provider
         self.dim = dim
         self.topk = topk
         self.min_score = min_score
 
-    async def _retrieve_async(self, user_id: int, query_text: str) -> List[Dict[str, Any]]:
+    async def _retrieve_async(self, user_id: str, query_text: str) -> List[Dict[str, Any]]:
         # 1) Get embedding
         vecs = await self.emb.embed([query_text])
         q = vecs[0]
 
         # 2) Call RPC memory_search(u bigint, q vector(1536), k int)
         try:
-            resp = self.db.rpc("memory_search", {"u": user_id, "q": q, "k": self.topk}).execute()
+            resp = self.db.rpc("memory_search", {"u": str(user_id), "q": q, "k": self.topk}).execute()
             rows = resp.data or []
         except Exception:
             rows = []
