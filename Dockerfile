@@ -18,4 +18,4 @@ USER appuser
 ENV PORT=8080
 
 # Gunicorn: 2 workers, 8 threads (I/O bound), phù hợp webhook
-CMD ["bash","-lc","gunicorn app:app -w 2 -k gthread --threads 8 -b :${PORT} --timeout 120 --keep-alive 5"]
+CMD ["bash","-lc","exec gunicorn app:app -w ${WEB_CONCURRENCY:-1} -k gthread --threads ${THREADS:-8} -b :${PORT} --timeout 120 --keep-alive 5"]
