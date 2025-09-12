@@ -3,54 +3,34 @@ import os
 from functools import lru_cache
 from typing import Iterable, List
 
-DEFAULT_MODEL = os.getenv("EMBED_MODEL", "local:BAAI/bge-small-en-v1.5")
+# Mặc định 384d, phù hợp FastEmbed (BGE-small)
+DEFAULT_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+CACHE_DIR = os.getenv("FASTEMBED_CACHE_DIR", "/tmp/fastembed")
 
 @lru_cache(maxsize=1)
-def _get_impl():
-    """
-    Trả về tuple (impl_name, impl_obj)
-    impl_name: 'fastembed' | 'st'
-    impl_obj: instance embedder tương ứng
-    """
-    model = os.getenv("EMBED_MODEL", DEFAULT_MODEL)
-
-    # --- FastEmbed (khuyên dùng Cloud Run) ---
-    if model.startswith("local:") or "bge-small" in model:
-        # lazy import để giảm RAM lúc boot
-        from fastembed import TextEmbedding
-        return ("fastembed", TextEmbedding())
-
-    # --- Sentence-Transformers (tùy chọn khi dev local) ---
-    if model.startswith("sentence-transformers/"):
-        from sentence_transformers import SentenceTransformer
-        # luôn dùng CPU trên Cloud Run
-        return ("st", SentenceTransformer(model, device="cpu"))
-
-    raise RuntimeError(f"Unsupported EMBED_MODEL: {model}")
-
-def _to_list(vec):
-    return vec.tolist() if hasattr(vec, "tolist") else list(vec)
+def _get_fastembed(model_id: str):
+    # Lazy import để giảm RAM khi boot
+    from fastembed import TextEmbedding
+    return TextEmbedding(model_name=model_id, cache_dir=CACHE_DIR)
 
 class EmbeddingsProvider:
     """
-    API dùng thống nhất trong app:
-      - EmbeddingsProvider.embed_one(text) -> List[float]
-      - EmbeddingsProvider.embed_many(texts) -> List[List[float]]
+    Dùng interface async để khớp với code hiện tại:
+      emb = EmbeddingsProvider(api_key, base_url, model_id)
+      vecs = await emb.embed(["text1", "text2"])
+    Với FastEmbed (local), api_key/base_url không dùng nhưng vẫn nhận tham số
+    để không phải sửa chỗ gọi.
     """
+    def __init__(self, api_key: str, base_url: str, model_id: str | None = None):
+        self.api_key = api_key
+        self.base_url = (base_url or "").rstrip("/")
+        self.model_id = model_id or DEFAULT_MODEL
 
-    @staticmethod
-    def embed_many(texts: Iterable[str]) -> List[List[float]]:
-        impl, emb = _get_impl()
+    async def embed(self, texts: Iterable[str]) -> List[List[float]]:
         texts = list(texts or [])
         if not texts:
             return []
-        if impl == "fastembed":
-            # FastEmbed trả iterator -> list
-            return [_to_list(v) for v in emb.embed(texts)]
-        # Sentence-Transformers
-        return [ _to_list(v) for v in emb.encode(texts, normalize_embeddings=True) ]
-
-    @staticmethod
-    def embed_one(text: str) -> List[float]:
-        arr = EmbeddingsProvider.embed_many([text])
-        return arr[0] if arr else []
+        # FastEmbed CPU, trả iterator → list
+        emb = _get_fastembed(self.model_id)
+        vecs = [list(v) for v in emb.embed(texts)]
+        return vecs
