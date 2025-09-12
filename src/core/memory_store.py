@@ -1,4 +1,5 @@
-import os, asyncio
+# src/core/memory_store.py
+import os
 from typing import List, Dict, Any
 from supabase import create_client
 from core.providers.embeddings_provider import EmbeddingsProvider
@@ -19,16 +20,17 @@ class MemoryStore:
         if not self.db:
             return []
         vec = (await self.emb.embed([query]))[0]
-        # user_id trong DB là TEXT → ép về string để RPC khớp kiểu
+        # user_id dạng TEXT trong DB hiện tại → ép string cho an toàn
         rpc = self.db.rpc("memory_search", {"u": str(user_id), "q": vec, "k": top_k}).execute()
         return rpc.data or []
 
     async def add_fact(self, user_id: int | str, content: str, weight: float = 1.0):
         if not self.db:
             return
-        # đưa weight vào meta cho an toàn với schema hiện tại
         res = self.db.table("memory_facts").insert({
-            "user_id": str(user_id), "content": content, "meta": {"weight": weight}
+            "user_id": str(user_id),
+            "content": content,
+            "meta": {"weight": weight}
         }).execute()
         fid = res.data[0]["id"]
         emb = (await self.emb.embed([content]))[0]
@@ -54,7 +56,7 @@ class MemoryStore:
         self.db.table("memory_vectors").insert({
             "user_id": str(user_id),
             "ref_type": "summary",
-            "ref_id": sid,
+            "ref_id": sid,              # <— dùng ref_id, KHÔNG phải summary_id
             "content": summary,
             "embedding": emb
         }).execute()
