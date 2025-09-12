@@ -1,5 +1,4 @@
--- 001_memory.sql — RAG memory schema (pgvector, 1536 dims for openai/text-embedding-3-small)
--- Run this in Supabase SQL editor (or psql). Safe to re-run.
+-- 001_memory_384.sql — RAG memory schema for 384d (FastEmbed / BGE-small)
 
 create extension if not exists vector;
 
@@ -11,31 +10,35 @@ create table if not exists memory_facts (
   created_at timestamptz default now()
 );
 
--- Choose ONE dimension that matches your embedding model.
--- For openai/text-embedding-3-small: 1536
--- For openai/text-embedding-3-large: 3072
 create table if not exists memory_vectors (
   id bigserial primary key,
   user_id bigint not null,
-  ref_type text not null check (ref_type in ('fact','summary')),
-  ref_id bigint,
+  ref_type text not null,      -- 'fact' | 'summary' | ...
+  ref_id bigint not null,
   content text not null,
-  embedding vector(1536) not null,
-  created_at timestamptz default now()
+  embedding vector(384) not null
 );
 
 create index if not exists idx_memory_vectors_user on memory_vectors(user_id);
--- Cosine distance index for fast ANN search
 create index if not exists idx_memory_vectors_embedding on memory_vectors
   using ivfflat (embedding vector_cosine_ops) with (lists = 100);
 
--- Cosine-similarity search: returns highest score (0..1)
-create or replace function memory_search(u bigint, q vector(1536), k int default 8)
-returns table(ref_type text, ref_id bigint, content text, score float4)
+-- Cosine: distance nhỏ hơn = giống hơn; similarity = 1 - distance
+create or replace function memory_search(
+  u bigint,
+  q vector(384),
+  k int default 8
+) returns table(ref_type text, ref_id bigint, content text, distance double precision, similarity double precision)
 language sql stable as $$
-  select ref_type, ref_id, content, 1 - (embedding <=> q) as score
+  select ref_type, ref_id, content,
+         embedding <=> q as distance,
+         1 - (embedding <=> q) as similarity
   from memory_vectors
   where user_id = u
   order by embedding <=> q
   limit k
 $$;
+
+-- Gợi ý: sau khi tạo/đổi schema
+notify pgrst, 'reload schema';
+analyze memory_vectors;
