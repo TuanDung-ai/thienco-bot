@@ -1,19 +1,19 @@
-# --- Core server ---
-flask==3.0.3
-gunicorn==21.2.0
-httpx==0.27.2
-pydantic==2.8.2
-supabase==2.6.0
-python-dotenv==1.0.1
-openai>=1.0.0
-python-dateutil
-pytz
-
-# --- Embeddings ---
-fastembed==0.3.6   # dùng chính thức cho Cloud Run (nhẹ, CPU-friendly)
-
-# --- Optional: bật khi chạy local dev ---
-# sentence-transformers>=3.0.0
-# torch>=2.1.0
-# python-telegram-bot>=13
-# requests>=2.31
+ # --- Core server ---
+ flask==3.0.3
+ gunicorn==21.2.0
+ httpx==0.27.2
+ pydantic==2.8.2
+ supabase==2.6.0
+ python-dotenv==1.0.1
+ openai>=1.0.0
+ python-dateutil
+ pytz
+-sentence-transformers>=3.0.0
+-torch>=2.1.0
++
++# --- Embeddings (Cloud Run) ---
++fastembed==0.3.6
++
++# --- Optional (dev local, KHÔNG bật trên Cloud Run) ---
++# sentence-transformers>=3.0.0
++# torch>=2.1.0
