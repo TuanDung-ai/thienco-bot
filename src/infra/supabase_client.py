@@ -26,10 +26,9 @@ def is_ready() -> bool:
 
 def insert_message(row: Dict[str, Any]) -> None:
     """
-    Ghi vào public.messages.
-    - Bảng hiện tại của bạn còn ràng buộc NOT NULL cho cột chat_id.
-      Do đó ta điền CẢ `chat_id` và `user_id` = cùng giá trị (Telegram chat_id).
-    - Chấp nhận đầu vào có 'user_id' hoặc 'chat_id'.
+    Ghi vào public.messages (resilient):
+    - Ưu tiên insert có 'chat_id' (nếu bảng có cột này).
+    - Nếu lỗi vì thiếu cột chat_id -> fallback insert không chat_id.
     """
     if _client is None:
         return
@@ -38,12 +37,26 @@ def insert_message(row: Dict[str, Any]) -> None:
         if not uid:
             log_error("Supabase insert skipped: missing user_id/chat_id.")
             return
-        payload = {
+
+        base_payload = {
             "user_id": uid,
-            "chat_id": uid,                 # <-- QUAN TRỌNG để thỏa NOT NULL chat_id
             "role": row.get("role", "user"),
             "content": row.get("content", ""),
         }
-        _client.table("messages").insert(payload).execute()
+
+        # 1) thử với chat_id
+        try:
+            payload_with_chat = {**base_payload, "chat_id": uid}
+            _client.table("messages").insert(payload_with_chat).execute()
+            return
+        except Exception as e1:
+            msg = str(e1).lower()
+            if "chat_id" not in msg and "column" not in msg:
+                # lỗi khác, log rồi thử fallback
+                log_error(f"messages insert (with chat_id) error: {e1}")
+
+        # 2) fallback: không chat_id
+        _client.table("messages").insert(base_payload).execute()
+
     except Exception as e:
         log_error(f"Supabase insert error: {e}")
