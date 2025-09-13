@@ -54,7 +54,7 @@ class Settings(BaseModel):
     LLM_TIMEOUT: int = 8           # giây, timeout cho gọi LLM
 
     # --- MỚI: BỘ NHỚ & NGỮ CẢNH ---
-    EMBED_MODEL: str = "text-embedding-3-small"
+    EMBED_MODEL: str = "BAAI/bge-small-en-v1.5"
     MEMORY_TOPK: int = 8           # số mảnh ngữ cảnh lấy vào prompt
     SUMMARY_EVERY_N: int = 12      # tóm tắt sau mỗi N tin (nếu bật summarize)
     TIMEZONE_DEFAULT: str = "Asia/Ho_Chi_Minh"
